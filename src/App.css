@@ -47,6 +47,45 @@
   animation: check-pop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
+/* ==========================================================
+   Smooth Hardware-Accelerated Mobile Theme Transitions
+   ========================================================== */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-gpu-crossfade 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes theme-gpu-crossfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Fallback synchronized transition for mobile browsers without View Transitions */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition: background-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition-delay: 0s !important;
+}
+
 /* 3D Glassy Floating Navbar Animation & Effects */
 .floating-glass-navbar {
   backdrop-filter: blur(20px) saturate(180%);

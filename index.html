@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="P2P file and text sharing directly between browsers. No servers, no uploads." />
+    <meta name="theme-color" id="theme-color-meta" content="#050505" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=3" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,12 +14,15 @@
       (function() {
         try {
           var saved = localStorage.getItem('theme');
+          var meta = document.getElementById('theme-color-meta');
           if (saved === 'light') {
             document.documentElement.classList.add('light');
             document.documentElement.classList.remove('dark');
+            if (meta) meta.setAttribute('content', '#f8fafc');
           } else {
             document.documentElement.classList.add('dark');
             document.documentElement.classList.remove('light');
+            if (meta) meta.setAttribute('content', '#050505');
           }
         } catch (e) {
           document.documentElement.classList.add('dark');

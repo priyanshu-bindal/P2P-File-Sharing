@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { UploadCloud, Plus } from 'lucide-react';
 import { useCardSpotlight } from '../hooks/useCardSpotlight';
 
-export function DropZone({ isConnected, onSendFiles }) {
+export function DropZone({ isConnected, connectedPeersCount = 0, onSendFiles }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const spotlight = useCardSpotlight({ tilt: isConnected, maxTilt: 1.8 });
@@ -79,13 +79,21 @@ export function DropZone({ isConnected, onSendFiles }) {
           <div>
             <h3 className="text-sm sm:text-base font-semibold text-slate-800 dark:text-white transition-colors group-hover:text-violet-700 dark:group-hover:text-violet-100">
               {isConnected ? (
-                <>Drop files here or <span className="text-violet-600 dark:text-violet-400 underline underline-offset-4 decoration-violet-500/50 group-hover:text-violet-700 dark:group-hover:text-violet-300">browse</span></>
+                connectedPeersCount > 1 ? (
+                  <>Drop files to send to all <span className="text-violet-600 dark:text-violet-400 font-bold">{connectedPeersCount} devices</span> (or <span className="underline underline-offset-4 decoration-violet-500/50">browse</span>)</>
+                ) : (
+                  <>Drop files here or <span className="text-violet-600 dark:text-violet-400 underline underline-offset-4 decoration-violet-500/50 group-hover:text-violet-700 dark:group-hover:text-violet-300">browse</span></>
+                )
               ) : (
                 'Connect to a peer to send files'
               )}
             </h3>
             <p className="text-xs text-slate-500 dark:text-neutral-500 mt-1">
-              {isConnected ? 'Any file size • 16 KB chunked stream with backpressure' : 'Share your code or enter a friend\'s code above'}
+              {isConnected
+                ? connectedPeersCount > 1
+                  ? `Simultaneous multi-device P2P streaming • 16 KB backpressure chunks`
+                  : 'Any file size • 16 KB chunked stream with backpressure'
+                : 'Share your code or enter a friend\'s code above'}
             </p>
           </div>
 

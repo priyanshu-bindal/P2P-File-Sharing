@@ -16,10 +16,11 @@ export function ConnectCard({
   myCode,
   isReady,
   connectionStatus,
-  connectedPeerCode,
+  connectedPeers = [],
   shareableUrl,
   onConnect,
   onDisconnect,
+  onDisconnectPeer,
   onRegenerateCode,
 }) {
   const [friendCode, setFriendCode] = useState('');
@@ -58,10 +59,10 @@ export function ConnectCard({
     e.preventDefault();
     if (friendCode.trim()) {
       onConnect(friendCode);
+      setFriendCode('');
     }
   };
 
-  const isConnected = connectionStatus === 'connected';
   const isConnecting = connectionStatus === 'connecting';
   const spotlight = useCardSpotlight({ tilt: true, maxTilt: 1.5 });
 
@@ -76,18 +77,42 @@ export function ConnectCard({
           Connection Status
         </span>
 
-        {isConnected ? (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-medium transition-all animate-in fade-in duration-200 shadow-xs">
-            <div className="relative flex h-2 w-2 items-center justify-center">
+        {connectedPeers.length > 0 ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="relative flex h-2 w-2 items-center justify-center flex-shrink-0 mr-0.5">
               <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-radar" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
             </div>
-            <span>Connected: <strong className="font-mono text-slate-900 dark:text-white tracking-wider">{connectedPeerCode}</strong></span>
+            <span className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold mr-0.5">
+              Connected ({connectedPeers.length}):
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {connectedPeers.map((code) => (
+                <span
+                  key={code}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-mono font-bold"
+                >
+                  <span>{code}</span>
+                  {onDisconnectPeer && (
+                    <button
+                      type="button"
+                      onClick={() => onDisconnectPeer(code)}
+                      className="hover:text-rose-500 dark:hover:text-rose-400 p-0.5 rounded transition-colors cursor-pointer"
+                      title={`Disconnect device ${code}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
             <button
+              type="button"
               onClick={onDisconnect}
-              className="ml-1 text-[11px] underline text-emerald-600 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-white transition-colors cursor-pointer"
+              className="ml-1 text-[11px] underline text-slate-400 hover:text-rose-500 dark:text-neutral-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
+              title="Disconnect all devices"
             >
-              Disconnect
+              Disconnect All
             </button>
           </div>
         ) : isConnecting ? (
@@ -191,26 +216,26 @@ export function ConnectCard({
         <div className="group flex flex-col justify-between bg-slate-50/90 dark:bg-[#14141c] border border-slate-200/90 dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-violet-500/40 rounded-xl p-4 transition-all duration-300 shadow-xs dark:shadow-none hover:shadow-md dark:hover:shadow-violet-950/20 hover:-translate-y-0.5">
           <div>
             <span className="text-xs text-slate-500 dark:text-neutral-400 font-medium block mb-1.5">
-              Enter Friend's Code
+              {connectedPeers.length > 0 ? "Connect Another Device" : "Enter Friend's Code"}
             </span>
             <form onSubmit={handleSubmit} className="space-y-2.5">
               <input
                 type="text"
                 value={friendCode}
                 onChange={(e) => setFriendCode(sanitizeCode(e.target.value))}
-                placeholder="6-LETTER CODE"
+                placeholder={connectedPeers.length > 0 ? "ADD ANOTHER CODE" : "6-LETTER CODE"}
                 maxLength={8}
-                disabled={isConnected || isConnecting}
+                disabled={isConnecting || !isReady}
                 className="w-full bg-white dark:bg-[#08080a] border border-slate-200 dark:border-neutral-800 focus:border-violet-500 dark:focus:border-violet-500 focus:ring-1 focus:ring-violet-500/40 text-slate-900 dark:text-white font-mono text-center sm:text-left text-lg font-bold tracking-widest uppercase rounded-lg px-3.5 py-2 placeholder:text-slate-400 dark:placeholder:text-neutral-600 outline-none transition-all disabled:opacity-40 shadow-sm dark:shadow-none"
               />
 
               <button
                 type="submit"
-                disabled={!friendCode.trim() || isConnected || isConnecting || !isReady}
+                disabled={!friendCode.trim() || isConnecting || !isReady}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg px-4 py-2.5 transition-all duration-150 active:scale-[0.98] shadow-md shadow-violet-600/20 disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none cursor-pointer"
               >
-                <span>{isConnecting ? 'Connecting...' : isConnected ? 'Connected' : 'Connect'}</span>
-                {!isConnecting && !isConnected && <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />}
+                <span>{isConnecting ? 'Connecting...' : connectedPeers.length > 0 ? '+ Connect Another Device' : 'Connect'}</span>
+                {!isConnecting && <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />}
               </button>
             </form>
           </div>

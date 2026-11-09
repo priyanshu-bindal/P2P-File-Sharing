@@ -58,7 +58,8 @@ function waitForBuffer(dc, maxBuffered = MAX_BUFFERED_AMOUNT, isCancelledFn) {
 export function usePeer() {
   const [myCode, setMyCode] = useState(() => generateShortCode());
   const [connectionStatus, setConnectionStatus] = useState('idle'); // 'idle' | 'connecting' | 'connected' | 'disconnected'
-  const [connectedPeerCode, setConnectedPeerCode] = useState(null);
+  const [connectedPeers, setConnectedPeers] = useState([]); // array of active peer codes: ['ABC123', 'XYZ789']
+  const [connectedPeerCode, setConnectedPeerCode] = useState(null); // backwards-compatible representation
   const [error, setError] = useState(null);
   const [transfers, setTransfers] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -67,7 +68,7 @@ export function usePeer() {
 
   // Mutable refs to prevent stale closures and unnecessary re-renders
   const peerRef = useRef(null);
-  const activeConnRef = useRef(null);
+  const connectionsRef = useRef(new Map()); // Map<remoteCode, conn>
   const isReadyRef = useRef(false);
   const myCodeRef = useRef(myCode);
   const cancelledTransfersRef = useRef(new Set());
@@ -89,6 +90,24 @@ export function usePeer() {
     return peerId.startsWith(PEER_PREFIX) ? peerId.slice(PEER_PREFIX.length) : peerId;
   }, []);
 
+  // Sync connected peers state from active connections map
+  const syncConnectedPeers = useCallback(() => {
+    const openCodes = [];
+    connectionsRef.current.forEach((conn, code) => {
+      if (conn && conn.open) {
+        openCodes.push(code);
+      }
+    });
+    setConnectedPeers(openCodes);
+    if (openCodes.length > 0) {
+      setConnectionStatus('connected');
+      setConnectedPeerCode(openCodes.length === 1 ? openCodes[0] : `${openCodes.length} devices`);
+    } else {
+      setConnectionStatus('idle');
+      setConnectedPeerCode(null);
+    }
+  }, []);
+
   // Update a transfer by id
   const updateTransfer = useCallback((id, patch) => {
     setTransfers((prev) =>
@@ -97,239 +116,254 @@ export function usePeer() {
   }, []);
 
   // Register data channel listeners on PeerJS connection
-  const setupConnection = useCallback((conn) => {
-    activeConnRef.current = conn;
-    const remoteCode = extractCode(conn.peer);
+  const setupConnection = useCallback(
+    (conn) => {
+      if (!conn) return;
+      const remoteCode = extractCode(conn.peer);
+      if (!remoteCode || remoteCode === myCodeRef.current) return;
 
-    const handleOpen = () => {
-      setConnectionStatus('connected');
-      setConnectedPeerCode(remoteCode);
-      setError(null);
-    };
+      connectionsRef.current.set(remoteCode, conn);
 
-    if (conn.open) {
-      handleOpen();
-    } else {
-      conn.on('open', handleOpen);
-    }
+      const handleOpen = () => {
+        syncConnectedPeers();
+        setError(null);
+      };
 
-    conn.on('data', (data) => {
-      if (!data || typeof data !== 'object') return;
+      if (conn.open) {
+        handleOpen();
+      } else {
+        conn.on('open', handleOpen);
+      }
 
-      switch (data.type) {
-        case 'file-meta': {
-          const { fileId, name, size, mimeType, totalChunks } = data;
+      conn.on('data', (data) => {
+        if (!data || typeof data !== 'object') return;
 
-          receivingBuffersRef.current.set(fileId, {
-            meta: { fileId, name, size, mimeType, totalChunks },
-            chunks: new Array(totalChunks),
-            receivedCount: 0,
-            bytesReceived: 0,
-            lastTime: performance.now(),
-            lastBytes: 0,
-            speed: 0,
-          });
+        switch (data.type) {
+          case 'file-meta': {
+            const { fileId, name, size, mimeType, totalChunks, senderCode } = data;
+            const originCode = senderCode || remoteCode;
 
-          setTransfers((prev) => [
-            {
-              id: fileId,
-              name,
-              size,
-              mimeType,
-              direction: 'receive',
-              status: 'receiving',
-              progress: 0,
-              bytesTransferred: 0,
-              totalBytes: size,
-              speed: 0,
-              downloadUrl: null,
-            },
-            ...prev,
-          ]);
-          break;
-        }
-
-        case 'file-chunk': {
-          const { fileId, chunkIndex, data: chunkBuffer } = data;
-          const record = receivingBuffersRef.current.get(fileId);
-          if (!record) return;
-
-          if (cancelledTransfersRef.current.has(fileId)) {
-            return;
-          }
-
-          record.chunks[chunkIndex] = chunkBuffer;
-          record.receivedCount += 1;
-          record.bytesReceived += chunkBuffer.byteLength || chunkBuffer.size || 0;
-
-          // Compute receiving speed with exponential smoothing
-          const now = performance.now();
-          const elapsed = (now - record.lastTime) / 1000;
-          if (elapsed >= 0.2) {
-            const bytesDelta = record.bytesReceived - record.lastBytes;
-            const currentSpeed = elapsed > 0 ? bytesDelta / elapsed : 0;
-            record.speed = record.speed === 0 ? currentSpeed : (record.speed * 0.7 + currentSpeed * 0.3);
-            record.lastTime = now;
-            record.lastBytes = record.bytesReceived;
-          }
-
-          const progress = record.meta.size > 0
-            ? Math.min(100, Math.round((record.bytesReceived / record.meta.size) * 100))
-            : 100;
-
-          updateTransfer(fileId, {
-            bytesTransferred: record.bytesReceived,
-            progress,
-            speed: Math.round(record.speed),
-          });
-          break;
-        }
-
-        case 'file-complete': {
-          const { fileId } = data;
-          const record = receivingBuffersRef.current.get(fileId);
-          if (!record) return;
-
-          try {
-            // Reconstruct blob from ordered chunks
-            const blob = new Blob(record.chunks, { type: record.meta.mimeType || 'application/octet-stream' });
-            const downloadUrl = URL.createObjectURL(blob);
-
-            updateTransfer(fileId, {
-              status: 'completed',
-              progress: 100,
-              bytesTransferred: record.meta.size,
-              speed: 0,
-              downloadUrl,
-              blob,
-            });
-          } catch (assembleErr) {
-            console.error('Failed to reconstruct blob:', assembleErr);
-            updateTransfer(fileId, {
-              status: 'failed',
-              error: 'Failed to reconstruct received file',
+            receivingBuffersRef.current.set(fileId, {
+              meta: { fileId, name, size, mimeType, totalChunks, senderCode: originCode },
+              chunks: new Array(totalChunks),
+              receivedCount: 0,
+              bytesReceived: 0,
+              lastTime: performance.now(),
+              lastBytes: 0,
               speed: 0,
             });
-          } finally {
+
+            setTransfers((prev) => [
+              {
+                id: fileId,
+                name,
+                size,
+                mimeType,
+                senderCode: originCode,
+                direction: 'receive',
+                status: 'receiving',
+                progress: 0,
+                bytesTransferred: 0,
+                totalBytes: size,
+                speed: 0,
+                downloadUrl: null,
+              },
+              ...prev,
+            ]);
+            break;
+          }
+
+          case 'file-chunk': {
+            const { fileId, chunkIndex, data: chunkBuffer } = data;
+            const record = receivingBuffersRef.current.get(fileId);
+            if (!record) return;
+
+            if (cancelledTransfersRef.current.has(fileId)) {
+              return;
+            }
+
+            record.chunks[chunkIndex] = chunkBuffer;
+            record.receivedCount += 1;
+            record.bytesReceived += chunkBuffer.byteLength || chunkBuffer.size || 0;
+
+            // Compute receiving speed with exponential smoothing
+            const now = performance.now();
+            const elapsed = (now - record.lastTime) / 1000;
+            if (elapsed >= 0.2) {
+              const bytesDelta = record.bytesReceived - record.lastBytes;
+              const currentSpeed = elapsed > 0 ? bytesDelta / elapsed : 0;
+              record.speed = record.speed === 0 ? currentSpeed : record.speed * 0.7 + currentSpeed * 0.3;
+              record.lastTime = now;
+              record.lastBytes = record.bytesReceived;
+            }
+
+            const progress =
+              record.meta.size > 0
+                ? Math.min(100, Math.round((record.bytesReceived / record.meta.size) * 100))
+                : 100;
+
+            updateTransfer(fileId, {
+              bytesTransferred: record.bytesReceived,
+              progress,
+              speed: Math.round(record.speed),
+            });
+            break;
+          }
+
+          case 'file-complete': {
+            const { fileId } = data;
+            const record = receivingBuffersRef.current.get(fileId);
+            if (!record) return;
+
+            try {
+              // Reconstruct blob from ordered chunks
+              const blob = new Blob(record.chunks, {
+                type: record.meta.mimeType || 'application/octet-stream',
+              });
+              const downloadUrl = URL.createObjectURL(blob);
+
+              updateTransfer(fileId, {
+                status: 'completed',
+                progress: 100,
+                bytesTransferred: record.meta.size,
+                speed: 0,
+                downloadUrl,
+                blob,
+              });
+            } catch (assembleErr) {
+              console.error('Failed to reconstruct blob:', assembleErr);
+              updateTransfer(fileId, {
+                status: 'failed',
+                error: 'Failed to reconstruct received file',
+                speed: 0,
+              });
+            } finally {
+              receivingBuffersRef.current.delete(fileId);
+            }
+            break;
+          }
+
+          case 'file-cancel': {
+            const { fileId } = data;
             receivingBuffersRef.current.delete(fileId);
+            cancelledTransfersRef.current.add(fileId);
+            updateTransfer(fileId, {
+              status: 'cancelled',
+              speed: 0,
+              error: `Transfer was cancelled by peer ${remoteCode}`,
+            });
+            break;
           }
-          break;
+
+          case 'text-message': {
+            const { id, text, timestamp, senderCode } = data;
+            if (!text) break;
+            const originCode = senderCode || remoteCode;
+
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === id)) return prev;
+              return [
+                {
+                  id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                  text,
+                  sender: 'peer',
+                  senderCode: originCode,
+                  timestamp: timestamp || Date.now(),
+                },
+                ...prev,
+              ];
+            });
+            setUnreadTextCount((c) => c + 1);
+
+            // Relay message to other connected peers (excluding origin) for group room mesh
+            connectionsRef.current.forEach((otherConn, otherCode) => {
+              if (otherCode !== remoteCode && otherCode !== originCode && otherConn && otherConn.open) {
+                try {
+                  otherConn.send({
+                    type: 'text-message',
+                    id,
+                    text,
+                    timestamp,
+                    senderCode: originCode,
+                  });
+                } catch (_) {
+                  // ignore relay error
+                }
+              }
+            });
+            break;
+          }
+
+          default:
+            break;
         }
-
-        case 'file-cancel': {
-          const { fileId } = data;
-          receivingBuffersRef.current.delete(fileId);
-          cancelledTransfersRef.current.add(fileId);
-          updateTransfer(fileId, {
-            status: 'cancelled',
-            speed: 0,
-            error: 'Transfer was cancelled by peer',
-          });
-          break;
-        }
-
-        case 'text-message': {
-          const { id, text, timestamp } = data;
-          if (!text) break;
-          setMessages((prev) => [
-            {
-              id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-              text,
-              sender: 'peer',
-              timestamp: timestamp || Date.now(),
-            },
-            ...prev,
-          ]);
-          setUnreadTextCount((c) => c + 1);
-          break;
-        }
-
-        default:
-          break;
-      }
-    });
-
-    conn.on('close', () => {
-      setConnectionStatus('disconnected');
-      setConnectedPeerCode(null);
-      setError('Peer disconnected.');
-      activeConnRef.current = null;
-      sendQueueRef.current = [];
-
-      // Fail any in-progress or queued transfers
-      setTransfers((prev) =>
-        prev.map((t) =>
-          t.status === 'sending' || t.status === 'receiving' || t.status === 'pending'
-            ? { ...t, status: 'failed', speed: 0, error: 'Peer disconnected' }
-            : t
-        )
-      );
-    });
-
-    conn.on('error', (connErr) => {
-      console.error('Connection error:', connErr);
-      setConnectionStatus('disconnected');
-      setError('Connection error occurred.');
-    });
-  }, [extractCode, updateTransfer]);
-
-  // Connect to another peer with 6-char code
-  const connectToPeer = useCallback((codeToConnect) => {
-    const sanitized = sanitizeCode(codeToConnect);
-    if (!sanitized) {
-      setError('Please enter a valid 6-character code.');
-      return;
-    }
-    if (sanitized === myCodeRef.current) {
-      setError("You cannot connect to your own code. Share this code with a friend!");
-      return;
-    }
-    if (!peerRef.current || !isReadyRef.current) {
-      setError('P2P connection is still initializing. Please wait a moment.');
-      return;
-    }
-
-    if (activeConnRef.current) {
-      try {
-        activeConnRef.current.close();
-      } catch (_closeErr) {
-        // Connection may already be closed
-      }
-      activeConnRef.current = null;
-    }
-
-    setConnectionStatus('connecting');
-    setError(null);
-
-    const fullTargetId = `${PEER_PREFIX}${sanitized}`;
-    try {
-      const conn = peerRef.current.connect(fullTargetId, {
-        reliable: true,
       });
 
-      setupConnection(conn);
+      conn.on('close', () => {
+        connectionsRef.current.delete(remoteCode);
+        syncConnectedPeers();
+      });
 
-      // Timeout watchdog
-      const timer = setTimeout(() => {
-        if (!activeConnRef.current || !activeConnRef.current.open) {
-          setConnectionStatus((curr) => {
-            if (curr === 'connecting') {
-              setError(`Connection timed out. Ensure peer "${sanitized}" is online with this app open.`);
-              return 'disconnected';
-            }
-            return curr;
-          });
-        }
-      }, 15000);
+      conn.on('error', (connErr) => {
+        console.warn(`Connection error on peer ${remoteCode}:`, connErr);
+        connectionsRef.current.delete(remoteCode);
+        syncConnectedPeers();
+      });
+    },
+    [extractCode, syncConnectedPeers, updateTransfer]
+  );
 
-      conn.on('open', () => clearTimeout(timer));
-      conn.on('error', () => clearTimeout(timer));
-    } catch (connectErr) {
-      console.error('Failed to initiate connection:', connectErr);
-      setConnectionStatus('disconnected');
-      setError('Failed to establish connection to peer.');
-    }
-  }, [setupConnection]);
+  // Connect to another peer with 6-char code without dropping existing connections
+  const connectToPeer = useCallback(
+    (codeToConnect) => {
+      const sanitized = sanitizeCode(codeToConnect);
+      if (!sanitized) {
+        setError('Please enter a valid 6-character code.');
+        return;
+      }
+      if (sanitized === myCodeRef.current) {
+        setError('You cannot connect to your own code. Share this code with another device!');
+        return;
+      }
+      const existing = connectionsRef.current.get(sanitized);
+      if (existing && existing.open) {
+        setError(`Device "${sanitized}" is already connected.`);
+        return;
+      }
+      if (!peerRef.current || !isReadyRef.current) {
+        setError('P2P connection is still initializing. Please wait a moment.');
+        return;
+      }
+
+      setConnectionStatus((curr) => (curr === 'connected' ? 'connected' : 'connecting'));
+      setError(null);
+
+      const fullTargetId = `${PEER_PREFIX}${sanitized}`;
+      try {
+        const conn = peerRef.current.connect(fullTargetId, {
+          reliable: true,
+        });
+
+        setupConnection(conn);
+
+        // Timeout watchdog for this specific connection
+        const timer = setTimeout(() => {
+          const c = connectionsRef.current.get(sanitized);
+          if (!c || !c.open) {
+            setError(`Connection timed out for device "${sanitized}". Ensure it is online with BeamDrop open.`);
+            syncConnectedPeers();
+          }
+        }, 15000);
+
+        conn.on('open', () => clearTimeout(timer));
+        conn.on('error', () => clearTimeout(timer));
+      } catch (connectErr) {
+        console.error('Failed to initiate connection:', connectErr);
+        setError(`Failed to connect to device "${sanitized}".`);
+      }
+    },
+    [setupConnection, syncConnectedPeers]
+  );
 
   // Keep refs synced via effect (not during render) to satisfy React rules
   const connectToPeerRef = useRef(connectToPeer);
@@ -343,19 +377,37 @@ export function usePeer() {
     setupConnectionRef.current = setupConnection;
   }, [setupConnection]);
 
-  // Disconnect from active peer
-  const disconnect = useCallback(() => {
-    if (activeConnRef.current) {
-      try {
-        activeConnRef.current.close();
-      } catch (_closeErr) {
-        // Connection may already be closed
+  // Disconnect from a specific connected peer
+  const disconnectPeer = useCallback(
+    (peerCode) => {
+      const conn = connectionsRef.current.get(peerCode);
+      if (conn) {
+        try {
+          conn.close();
+        } catch (_closeErr) {
+          // ignore
+        }
+        connectionsRef.current.delete(peerCode);
+        syncConnectedPeers();
       }
-      activeConnRef.current = null;
-    }
+    },
+    [syncConnectedPeers]
+  );
+
+  // Disconnect from ALL connected peers
+  const disconnect = useCallback(() => {
+    connectionsRef.current.forEach((conn) => {
+      try {
+        conn.close();
+      } catch (_closeErr) {
+        // ignore
+      }
+    });
+    connectionsRef.current.clear();
     sendQueueRef.current = [];
-    setConnectionStatus('disconnected');
+    setConnectedPeers([]);
     setConnectedPeerCode(null);
+    setConnectionStatus('disconnected');
   }, []);
 
   // Cancel a transfer
@@ -365,16 +417,19 @@ export function usePeer() {
     // Remove from pending queue if not yet sending
     sendQueueRef.current = sendQueueRef.current.filter((item) => item.id !== transferId);
 
-    if (activeConnRef.current?.open) {
-      try {
-        activeConnRef.current.send({
-          type: 'file-cancel',
-          fileId: transferId,
-        });
-      } catch (_sendErr) {
-        // Connection may be closing
+    // Broadcast cancel to all active connections
+    connectionsRef.current.forEach((conn) => {
+      if (conn && conn.open) {
+        try {
+          conn.send({
+            type: 'file-cancel',
+            fileId: transferId,
+          });
+        } catch (_sendErr) {
+          // ignore
+        }
       }
-    }
+    });
 
     receivingBuffersRef.current.delete(transferId);
 
@@ -385,7 +440,7 @@ export function usePeer() {
     });
   }, [updateTransfer]);
 
-  // Process sequential send queue
+  // Process sequential send queue across ALL connected peers
   const processSendQueue = useCallback(async () => {
     if (isProcessingQueueRef.current) return;
     isProcessingQueueRef.current = true;
@@ -401,31 +456,34 @@ export function usePeer() {
         continue;
       }
 
-      if (!activeConnRef.current?.open) {
+      let activeConns = Array.from(connectionsRef.current.values()).filter((c) => c && c.open);
+      if (activeConns.length === 0) {
         updateTransfer(fileId, {
           status: 'failed',
           speed: 0,
-          error: 'Connection lost before sending',
+          error: 'No connected peers available to send',
         });
         continue;
       }
 
       const totalChunks = Math.max(1, Math.ceil(size / CHUNK_SIZE));
 
-      // 1. Send file metadata header
-      try {
-        activeConnRef.current.send({
-          type: 'file-meta',
-          fileId,
-          name,
-          size,
-          mimeType,
-          totalChunks,
-          chunkSize: CHUNK_SIZE,
-        });
-      } catch (_metaErr) {
-        updateTransfer(fileId, { status: 'failed', error: 'Failed to send file header' });
-        continue;
+      // 1. Send file metadata header to all active connections
+      for (const conn of activeConns) {
+        try {
+          conn.send({
+            type: 'file-meta',
+            fileId,
+            name,
+            size,
+            mimeType,
+            totalChunks,
+            chunkSize: CHUNK_SIZE,
+            senderCode: myCodeRef.current,
+          });
+        } catch (_metaErr) {
+          // continue with others
+        }
       }
 
       updateTransfer(fileId, { status: 'sending', progress: 0 });
@@ -436,42 +494,34 @@ export function usePeer() {
       let currentSpeed = 0;
       let isCancelled = false;
 
-      const dataChannel = activeConnRef.current.dataChannel || activeConnRef.current._dc;
-
       // Handle 0-byte file edge case
       if (size === 0) {
         updateTransfer(fileId, { status: 'completed', progress: 100, bytesTransferred: 0, speed: 0 });
-        try {
-          activeConnRef.current.send({ type: 'file-complete', fileId });
-        } catch (_compErr) {
-          // ignore
+        for (const conn of activeConns) {
+          try {
+            conn.send({ type: 'file-complete', fileId });
+          } catch (_compErr) {
+            // ignore
+          }
         }
         continue;
       }
 
-      // 2. Send 16 KB chunks with backpressure
+      // 2. Stream 16 KB chunks to all connected peers with backpressure
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         if (cancelledTransfersRef.current.has(fileId)) {
           isCancelled = true;
           break;
         }
 
-        if (!activeConnRef.current?.open) {
+        // Refresh active connections
+        activeConns = activeConns.filter((c) => c && c.open);
+        if (activeConns.length === 0) {
           updateTransfer(fileId, {
             status: 'failed',
             speed: 0,
-            error: 'Connection dropped during transfer',
+            error: 'All connected peers disconnected during transfer',
           });
-          isCancelled = true;
-          break;
-        }
-
-        // Backpressure: pause if data channel buffer is full; abort immediately if cancelled
-        if (dataChannel && dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-          await waitForBuffer(dataChannel, MAX_BUFFERED_AMOUNT, () => cancelledTransfersRef.current.has(fileId));
-        }
-
-        if (cancelledTransfersRef.current.has(fileId)) {
           isCancelled = true;
           break;
         }
@@ -481,16 +531,31 @@ export function usePeer() {
         const slice = file.slice(start, end);
         const buffer = await slice.arrayBuffer();
 
-        try {
-          activeConnRef.current.send({
-            type: 'file-chunk',
-            fileId,
-            chunkIndex,
-            data: buffer,
-          });
-        } catch (_chunkErr) {
-          updateTransfer(fileId, { status: 'failed', error: 'Send buffer failure' });
-          isCancelled = true;
+        // Broadcast chunk to every connected peer
+        for (const conn of activeConns) {
+          const dc = conn.dataChannel || conn._dc;
+          if (dc && dc.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+            await waitForBuffer(dc, MAX_BUFFERED_AMOUNT, () => cancelledTransfersRef.current.has(fileId));
+          }
+
+          if (cancelledTransfersRef.current.has(fileId)) {
+            isCancelled = true;
+            break;
+          }
+
+          try {
+            conn.send({
+              type: 'file-chunk',
+              fileId,
+              chunkIndex,
+              data: buffer,
+            });
+          } catch (_chunkErr) {
+            // ignore individual failure, continue with others
+          }
+        }
+
+        if (isCancelled) {
           break;
         }
 
@@ -502,7 +567,7 @@ export function usePeer() {
         if (elapsed >= 0.2 || chunkIndex === totalChunks - 1) {
           const bytesDelta = bytesSent - lastBytes;
           const instantaneousSpeed = elapsed > 0 ? bytesDelta / elapsed : 0;
-          currentSpeed = currentSpeed === 0 ? instantaneousSpeed : (currentSpeed * 0.7 + instantaneousSpeed * 0.3);
+          currentSpeed = currentSpeed === 0 ? instantaneousSpeed : currentSpeed * 0.7 + instantaneousSpeed * 0.3;
           lastTime = now;
           lastBytes = bytesSent;
 
@@ -519,64 +584,74 @@ export function usePeer() {
         continue;
       }
 
-      // 3. Complete transfer and ensure buffer drains
-      if (activeConnRef.current?.open) {
-        if (dataChannel && dataChannel.bufferedAmount > 0) {
-          await waitForBuffer(dataChannel, 0, () => cancelledTransfersRef.current.has(fileId));
+      // 3. Complete transfer across all connections
+      activeConns = activeConns.filter((c) => c && c.open);
+      for (const conn of activeConns) {
+        const dc = conn.dataChannel || conn._dc;
+        if (dc && dc.bufferedAmount > 0) {
+          await waitForBuffer(dc, 0, () => cancelledTransfersRef.current.has(fileId));
         }
 
         try {
-          activeConnRef.current.send({
+          conn.send({
             type: 'file-complete',
             fileId,
-          });
-
-          updateTransfer(fileId, {
-            status: 'completed',
-            progress: 100,
-            bytesTransferred: size,
-            speed: 0,
           });
         } catch (_compErr) {
           // ignore
         }
       }
+
+      updateTransfer(fileId, {
+        status: 'completed',
+        progress: 100,
+        bytesTransferred: size,
+        speed: 0,
+      });
     }
 
     isProcessingQueueRef.current = false;
   }, [updateTransfer]);
 
-  // Send multiple files safely via sequential queue
-  const sendFiles = useCallback((files) => {
-    if (!activeConnRef.current || !activeConnRef.current.open) {
-      setError('Cannot send files: no peer is currently connected.');
-      return;
-    }
+  // Send multiple files to ALL currently connected peers
+  const sendFiles = useCallback(
+    (files) => {
+      const activeConns = Array.from(connectionsRef.current.values()).filter((c) => c && c.open);
+      if (activeConns.length === 0) {
+        setError('Cannot send files: no peers are currently connected.');
+        return;
+      }
 
-    const fileList = Array.from(files);
-    if (fileList.length === 0) return;
+      const fileList = Array.from(files);
+      if (fileList.length === 0) return;
 
-    const newTransfers = fileList.map((file) => {
-      const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      return {
-        id: fileId,
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-        direction: 'send',
-        status: 'pending',
-        progress: 0,
-        bytesTransferred: 0,
-        totalBytes: file.size,
-        speed: 0,
-        _file: file,
-      };
-    });
+      const recipientCodes = activeConns.map((c) => extractCode(c.peer));
 
-    setTransfers((prev) => [...newTransfers, ...prev]);
-    sendQueueRef.current.push(...newTransfers);
-    processSendQueue();
-  }, [processSendQueue]);
+      const newTransfers = fileList.map((file) => {
+        const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        return {
+          id: fileId,
+          name: file.name,
+          size: file.size,
+          mimeType: file.type || 'application/octet-stream',
+          direction: 'send',
+          status: 'pending',
+          progress: 0,
+          bytesTransferred: 0,
+          totalBytes: file.size,
+          speed: 0,
+          recipientCount: recipientCodes.length,
+          recipientCodes,
+          _file: file,
+        };
+      });
+
+      setTransfers((prev) => [...newTransfers, ...prev]);
+      sendQueueRef.current.push(...newTransfers);
+      processSendQueue();
+    },
+    [extractCode, processSendQueue]
+  );
 
   // PeerJS Lifecycle Effect
   useEffect(() => {
@@ -646,8 +721,7 @@ export function usePeer() {
         }
 
         if (err.type === 'peer-unavailable') {
-          setConnectionStatus('disconnected');
-          setError('Target peer not found. Check that the 6-character code is correct and your peer is online.');
+          setError('Target device not found. Ensure the code is correct and the other device is online with BeamDrop open.');
         } else {
           setError(err.message || 'P2P network error occurred.');
         }
@@ -702,9 +776,10 @@ export function usePeer() {
     };
   }, [transfers]);
 
-  const shareableUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?code=${myCode}`
-    : `?code=${myCode}`;
+  const shareableUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}?code=${myCode}`
+      : `?code=${myCode}`;
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -729,23 +804,33 @@ export function usePeer() {
     });
   }, []);
 
-  const sendText = useCallback((text) => {
-    if (!text || !text.trim()) return false;
-    if (!activeConnRef.current || !activeConnRef.current.open) {
-      setError('Cannot send text: no peer is currently connected.');
-      return false;
-    }
+  // Broadcast text message to ALL connected peers
+  const sendText = useCallback(
+    (text) => {
+      if (!text || !text.trim()) return false;
+      const activeConns = Array.from(connectionsRef.current.values()).filter((c) => c && c.open);
+      if (activeConns.length === 0) {
+        setError('Cannot send text: no peers are currently connected.');
+        return false;
+      }
 
-    const trimmed = text.trim();
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const timestamp = Date.now();
+      const trimmed = text.trim();
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const timestamp = Date.now();
+      const recipientCodes = activeConns.map((c) => extractCode(c.peer));
 
-    try {
-      activeConnRef.current.send({
-        type: 'text-message',
-        id,
-        text: trimmed,
-        timestamp,
+      activeConns.forEach((conn) => {
+        try {
+          conn.send({
+            type: 'text-message',
+            id,
+            text: trimmed,
+            timestamp,
+            senderCode: myCodeRef.current,
+          });
+        } catch (_sendErr) {
+          // ignore individual error
+        }
       });
 
       setMessages((prev) => [
@@ -753,17 +838,17 @@ export function usePeer() {
           id,
           text: trimmed,
           sender: 'me',
+          recipientCount: recipientCodes.length,
+          recipientCodes,
           timestamp,
         },
         ...prev,
       ]);
 
       return true;
-    } catch (_sendErr) {
-      setError('Failed to send text to peer.');
-      return false;
-    }
-  }, []);
+    },
+    [extractCode]
+  );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -787,6 +872,7 @@ export function usePeer() {
     myCode,
     isReady,
     connectionStatus,
+    connectedPeers,
     connectedPeerCode,
     error,
     clearError,
@@ -800,6 +886,7 @@ export function usePeer() {
     resetUnreadTextCount,
     connectToPeer,
     disconnect,
+    disconnectPeer,
     sendFiles,
     cancelTransfer,
     clearCompletedTransfers,

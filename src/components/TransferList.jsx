@@ -69,7 +69,13 @@ function TransferCardItem({ transfer, onCancelTransfer, onRemoveTransfer }) {
                 {transfer.name}
               </span>
               <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded leading-none bg-slate-100 dark:bg-white/[0.05] border border-slate-200/80 dark:border-white/[0.06] text-slate-600 dark:text-neutral-400">
-                {isSender ? 'Sent' : 'Received'}
+                {isSender
+                  ? transfer.recipientCount > 1
+                    ? `Sent to ${transfer.recipientCount} devices`
+                    : 'Sent'
+                  : transfer.senderCode
+                  ? `From ${transfer.senderCode}`
+                  : 'Received'}
               </span>
             </div>
 

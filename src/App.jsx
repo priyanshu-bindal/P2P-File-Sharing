@@ -50,6 +50,7 @@ export default function App() {
     myCode,
     isReady,
     connectionStatus,
+    connectedPeers = [],
     connectedPeerCode,
     error,
     clearError,
@@ -63,6 +64,7 @@ export default function App() {
     resetUnreadTextCount,
     connectToPeer,
     disconnect,
+    disconnectPeer,
     sendFiles,
     cancelTransfer,
     clearCompletedTransfers,
@@ -86,12 +88,15 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement;
+    const metaThemeColor = document.getElementById('theme-color-meta');
     if (theme === 'dark') {
       root.classList.add('dark');
       root.classList.remove('light');
+      if (metaThemeColor) metaThemeColor.setAttribute('content', '#050505');
     } else {
       root.classList.add('light');
       root.classList.remove('dark');
+      if (metaThemeColor) metaThemeColor.setAttribute('content', '#f8fafc');
     }
     try {
       localStorage.setItem('theme', theme);
@@ -101,7 +106,23 @@ export default function App() {
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+
+    // 1. If native hardware-accelerated View Transitions are supported (iOS Safari 18+, Chrome on Android)
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      document.startViewTransition(() => {
+        setTheme(nextTheme);
+      });
+      return;
+    }
+
+    // 2. Mobile fallback: Synchronize all DOM layer styles in lockstep without layout thrashing
+    const root = document.documentElement;
+    root.classList.add('theme-transitioning');
+    setTheme(nextTheme);
+    setTimeout(() => {
+      root.classList.remove('theme-transitioning');
+    }, 320);
   };
 
   const handleCopyInvite = async () => {
@@ -180,7 +201,9 @@ export default function App() {
               </div>
               <span>
                 {isConnected 
-                  ? `Paired: ${connectedPeerCode}` 
+                  ? connectedPeers.length === 1
+                    ? `Paired: ${connectedPeers[0]}`
+                    : `${connectedPeers.length} Devices Connected`
                   : isConnecting 
                   ? 'Connecting...' 
                   : isReady 
@@ -214,12 +237,12 @@ export default function App() {
             <button
               type="button"
               onClick={toggleTheme}
-              className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-neutral-300 border border-slate-200/90 dark:border-white/[0.1] shadow-xs dark:shadow-sm transition-all duration-300 active:scale-90 cursor-pointer relative overflow-hidden"
+              className="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-neutral-300 border border-slate-200/90 dark:border-white/[0.1] shadow-xs dark:shadow-sm transition-all duration-300 active:scale-90 cursor-pointer relative overflow-hidden touch-manipulation"
               title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
               aria-label="Toggle theme"
             >
-              <Sun className="w-4 h-4 text-amber-500 rotate-0 scale-100 transition-all duration-300 ease-out dark:-rotate-90 dark:scale-0 absolute" />
-              <Moon className="w-4 h-4 text-violet-400 rotate-90 scale-0 transition-all duration-300 ease-out dark:rotate-0 dark:scale-100 absolute" />
+              <Sun className="w-4 h-4 text-amber-500 rotate-0 scale-100 transition-all duration-300 ease-out dark:-rotate-90 dark:scale-0 absolute pointer-events-none" />
+              <Moon className="w-4 h-4 text-violet-400 rotate-90 scale-0 transition-all duration-300 ease-out dark:rotate-0 dark:scale-100 absolute pointer-events-none" />
             </button>
           </div>
         </div>
@@ -245,10 +268,12 @@ export default function App() {
           myCode={myCode}
           isReady={isReady}
           connectionStatus={connectionStatus}
+          connectedPeers={connectedPeers}
           connectedPeerCode={connectedPeerCode}
           shareableUrl={shareableUrl}
           onConnect={connectToPeer}
           onDisconnect={disconnect}
+          onDisconnectPeer={disconnectPeer}
           onRegenerateCode={regenerateCode}
         />
 
@@ -307,6 +332,7 @@ export default function App() {
             {/* File Drop Section */}
             <DropZone
               isConnected={isConnected}
+              connectedPeersCount={connectedPeers.length}
               onSendFiles={sendFiles}
             />
 
@@ -323,6 +349,7 @@ export default function App() {
             {/* Text & Clipboard Share Section */}
             <TextShare
               isConnected={isConnected}
+              connectedPeersCount={connectedPeers.length}
               messages={messages}
               onSendText={sendText}
               onClearMessages={clearMessages}

@@ -28,6 +28,7 @@ function formatTime(timestamp) {
 
 export function TextShare({
   isConnected,
+  connectedPeersCount = 0,
   messages = [],
   onSendText,
   onClearMessages,
@@ -131,7 +132,9 @@ export function TextShare({
               rows={3}
               placeholder={
                 isConnected
-                  ? 'Type or paste anything here... (Ctrl+Enter to send)'
+                  ? connectedPeersCount > 1
+                    ? `Broadcast text to all ${connectedPeersCount} devices... (Ctrl+Enter to send)`
+                    : 'Type or paste anything here... (Ctrl+Enter to send)'
                   : 'Connect with a peer above to share text & clipboard'
               }
               className="w-full bg-slate-50 dark:bg-[#08080a] border border-slate-200 dark:border-neutral-800 focus:border-violet-500 dark:focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 text-slate-900 dark:text-white text-xs sm:text-sm rounded-xl p-3.5 placeholder:text-slate-400 dark:placeholder:text-neutral-600 outline-none transition-all resize-y min-h-[90px] disabled:opacity-50 disabled:cursor-not-allowed font-sans"
@@ -238,7 +241,13 @@ export function TextShare({
                             : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-500/20'
                         }`}
                       >
-                        {isMe ? 'You sent' : 'Received'}
+                        {isMe
+                          ? item.recipientCount > 1
+                            ? `Sent to ${item.recipientCount} devices`
+                            : 'You sent'
+                          : item.senderCode
+                          ? `From ${item.senderCode}`
+                          : 'Received'}
                       </span>
                       <span className="text-[10px] text-slate-400 dark:text-neutral-500">
                         {formatTime(item.timestamp)}
