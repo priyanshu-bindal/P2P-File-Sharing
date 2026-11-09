@@ -10,7 +10,7 @@ const CHUNK_SIZE = 16 * 1024; // 16 KB chunks as specified
 const MAX_BUFFERED_AMOUNT = 64 * 1024; // 64 KB backpressure limit
 
 /**
- * Backpressure handler: pauses if WebRTC buffer is high, awaits 'bufferedamountlow'
+ * Backpressure handler: pauses if data channel buffer is high, awaits 'bufferedamountlow'
  * Supports early abort if transfer is cancelled
  */
 function waitForBuffer(dc, maxBuffered = MAX_BUFFERED_AMOUNT, isCancelledFn) {
@@ -61,6 +61,8 @@ export function usePeer() {
   const [connectedPeerCode, setConnectedPeerCode] = useState(null);
   const [error, setError] = useState(null);
   const [transfers, setTransfers] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [unreadTextCount, setUnreadTextCount] = useState(0);
   const [isReady, setIsReady] = useState(false);
 
   // Mutable refs to prevent stale closures and unnecessary re-renders
@@ -223,6 +225,22 @@ export function usePeer() {
             speed: 0,
             error: 'Transfer was cancelled by peer',
           });
+          break;
+        }
+
+        case 'text-message': {
+          const { id, text, timestamp } = data;
+          if (!text) break;
+          setMessages((prev) => [
+            {
+              id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+              text,
+              sender: 'peer',
+              timestamp: timestamp || Date.now(),
+            },
+            ...prev,
+          ]);
+          setUnreadTextCount((c) => c + 1);
           break;
         }
 
@@ -448,7 +466,7 @@ export function usePeer() {
           break;
         }
 
-        // Backpressure: pause if WebRTC buffer is full; abort immediately if cancelled
+        // Backpressure: pause if data channel buffer is full; abort immediately if cancelled
         if (dataChannel && dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
           await waitForBuffer(dataChannel, MAX_BUFFERED_AMOUNT, () => cancelledTransfersRef.current.has(fileId));
         }
@@ -621,7 +639,7 @@ export function usePeer() {
         console.error('Peer error event:', err.type, err.message);
 
         if (err.type === 'unavailable-id') {
-          // If code collision on public broker, regenerate and reload peer
+          // If code collision during peer discovery, regenerate and reload peer
           const newCode = generateShortCode();
           setMyCode(newCode);
           return;
@@ -645,7 +663,7 @@ export function usePeer() {
       });
     } catch (peerErr) {
       console.error('Peer instantiation error:', peerErr);
-      initError = 'Failed to initialize WebRTC subsystem.';
+      initError = 'Failed to initialize direct P2P connection.';
     }
 
     // Defer error state update so it runs after render, not synchronously inside the effect body
@@ -711,6 +729,54 @@ export function usePeer() {
     });
   }, []);
 
+  const sendText = useCallback((text) => {
+    if (!text || !text.trim()) return false;
+    if (!activeConnRef.current || !activeConnRef.current.open) {
+      setError('Cannot send text: no peer is currently connected.');
+      return false;
+    }
+
+    const trimmed = text.trim();
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const timestamp = Date.now();
+
+    try {
+      activeConnRef.current.send({
+        type: 'text-message',
+        id,
+        text: trimmed,
+        timestamp,
+      });
+
+      setMessages((prev) => [
+        {
+          id,
+          text: trimmed,
+          sender: 'me',
+          timestamp,
+        },
+        ...prev,
+      ]);
+
+      return true;
+    } catch (_sendErr) {
+      setError('Failed to send text to peer.');
+      return false;
+    }
+  }, []);
+
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  const removeMessage = useCallback((id) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  const resetUnreadTextCount = useCallback(() => {
+    setUnreadTextCount(0);
+  }, []);
+
   const regenerateCode = useCallback(() => {
     disconnect();
     const freshCode = generateShortCode();
@@ -726,6 +792,12 @@ export function usePeer() {
     clearError,
     shareableUrl,
     transfers,
+    messages,
+    unreadTextCount,
+    sendText,
+    clearMessages,
+    removeMessage,
+    resetUnreadTextCount,
     connectToPeer,
     disconnect,
     sendFiles,

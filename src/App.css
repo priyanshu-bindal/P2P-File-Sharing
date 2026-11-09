@@ -1,4 +1,4 @@
-/* Premium Micro-Animations */
+/* Premium Aesthetic Micro-Animations & Card Highlights */
 
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
@@ -29,8 +29,8 @@
 }
 
 @keyframes glow-breathe {
-  0%, 100% { opacity: 0.03; transform: scale(1); }
-  50% { opacity: 0.07; transform: scale(1.08); }
+  0%, 100% { opacity: 0.04; transform: scale(1); }
+  50% { opacity: 0.09; transform: scale(1.08); }
 }
 
 .animate-glow-breathe {
@@ -47,16 +47,118 @@
   animation: check-pop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
-/* Glass & Card Glow Micro-Interactions */
-.premium-card {
-  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+/* 3D Glassy Floating Navbar Animation & Effects */
+.floating-glass-navbar {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.premium-card:hover {
-  border-color: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+@keyframes navbar-idle-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+.animate-navbar-float {
+  animation: navbar-idle-float 4.5s ease-in-out infinite;
+}
+
+/* ==========================================================
+   React Bits Inspired Spotlight, Dynamic Border & 3D Tilt Card
+   ========================================================== */
+.aesthetic-card {
+  --mouse-x: 50%;
+  --mouse-y: 50%;
+  --spotlight-opacity: 0;
+  --card-rotate-x: 0deg;
+  --card-rotate-y: 0deg;
+  --glare-x: 50%;
+  --glare-y: 50%;
+  position: relative;
+  overflow: hidden;
+  transform: perspective(1000px) rotateX(var(--card-rotate-x, 0deg)) rotateY(var(--card-rotate-y, 0deg));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* Specular top-edge gradient light beam */
+.aesthetic-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.7), rgba(99, 102, 241, 0.7), rgba(6, 182, 212, 0.5), transparent);
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0.85;
+  transition: opacity 0.3s ease, left 0.3s ease, right 0.3s ease;
+}
+
+.aesthetic-card:hover::before {
+  opacity: 1;
+  left: 5%;
+  right: 5%;
+}
+
+/* React Bits Spotlight Cursor-Tracking Radial Glow */
+.aesthetic-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--spotlight-opacity, 0);
+  background: radial-gradient(
+    520px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(168, 85, 247, 0.16),
+    rgba(99, 102, 241, 0.08) 35%,
+    rgba(6, 182, 212, 0.03) 55%,
+    transparent 70%
+  );
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root:not(.dark) .aesthetic-card::after {
+  background: radial-gradient(
+    520px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(139, 92, 246, 0.12),
+    rgba(59, 130, 246, 0.06) 35%,
+    transparent 70%
+  );
+}
+
+/* Ensure interactive child elements remain above the spotlight overlay */
+.aesthetic-card > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Interactive Card Hover Glow & Border */
+.aesthetic-card:hover {
+  border-color: rgba(168, 85, 247, 0.38);
+  box-shadow: 0 16px 44px -8px rgba(124, 58, 237, 0.16),
+              0 4px 16px -2px rgba(0, 0, 0, 0.4),
+              inset 0 1px 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+:root:not(.dark) .aesthetic-card:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 16px 36px -8px rgba(99, 102, 241, 0.12),
+              0 4px 12px -2px rgba(0, 0, 0, 0.04),
+              inset 0 1px 1px 0 rgba(255, 255, 255, 0.95);
 }
 
 .button-interactive {
