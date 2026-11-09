@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#140e2a" />
+      <stop offset="100%" stop-color="#06060c" />
+    </linearGradient>
+
+    <!-- Vibrant Beam Gradient -->
+    <linearGradient id="beamGrad" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="45%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+
+    <!-- Drop Glow -->
+    <linearGradient id="dropGrad" x1="26" y1="26" x2="38" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Dark Squircle Frame -->
+  <rect width="64" height="64" rx="16" fill="url(#bgGrad)" stroke="#382d5e" stroke-width="1.8" />
+
+  <!-- Outer Concentric Beam Wave -->
+  <path d="M14 31 C14 21.059 22.059 13 32 13 C41.941 13 50 21.059 50 31" stroke="url(#beamGrad)" stroke-width="4.2" stroke-linecap="round" />
+
+  <!-- Mid Concentric Beam Wave -->
+  <path d="M21 32 C21 25.925 25.925 21 32 21 C38.075 21 43 25.925 43 32" stroke="#a78bfa" stroke-width="3.5" stroke-linecap="round" />
+
+  <!-- Droplet / Downward Beam Arrow -->
+  <path d="M32 27 C28.134 27 25 30.134 25 34 C25 39.5 32 49 32 49 C32 49 39 39.5 39 34 C39 30.134 35.866 27 32 27 Z" fill="url(#dropGrad)" filter="url(#glow)" />
+
+  <!-- Core Radiant Node -->
+  <circle cx="32" cy="34" r="3.2" fill="#ffffff" />
+</svg>
