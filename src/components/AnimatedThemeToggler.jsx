@@ -3,45 +3,15 @@ import { Moon, Sun } from "lucide-react";
 import { flushSync } from "react-dom";
 import { cn } from "@/lib/utils";
 
-/**
- * Detect if the device is a touch-primary mobile device.
- * We use this to choose a lighter animation path that won't lag.
- */
-function isTouchDevice() {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(pointer: coarse)").matches ||
-    window.matchMedia("(hover: none)").matches ||
-    "ontouchstart" in window
-  );
-}
-
-/**
- * Check if the device/browser can handle the heavy clip-path view transition
- * without dropping frames. Returns false on mobile or low-end hardware.
- */
-function canHandleClipPathTransition() {
-  if (typeof window === "undefined") return false;
-  if (typeof document.startViewTransition !== "function") return false;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-    return false;
-
-  // Touch-primary devices (phones, tablets) → skip clip-path, use fast crossfade
-  if (isTouchDevice()) return false;
-
-  // Low-end desktop devices
-  const cores = navigator.hardwareConcurrency;
-  const mem = navigator.deviceMemory;
-  if ((cores && cores <= 2) || (mem && mem < 2)) return false;
-
-  return true;
-}
-
 function polygonCollapsed(point, vertexCount) {
   const pairs = Array.from({ length: vertexCount }, () => point).join(", ");
   return `polygon(${pairs})`;
 }
 
+// All coordinates are percentages of the snapshot reference box: Chrome
+// renders absolute px clip-path coordinates on ::view-transition-new(root)
+// unscaled on fractional display scales (e.g. Windows 125%/150%) for the first
+// transition after load, so percentage values land at the exact position.
 function getThemeTransitionClipPaths(
   variant = "circle",
   cx,
@@ -94,7 +64,7 @@ function getThemeTransitionClipPaths(
 
 export function AnimatedThemeToggler({
   className,
-  duration = 450,
+  duration = 400,
   variant = "circle",
   fromCenter = false,
   theme,
@@ -108,17 +78,21 @@ export function AnimatedThemeToggler({
   const buttonRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const activeAnimRef = useRef(null);
+  const safetyTimeoutRef = useRef(null);
 
   const cancelAnim = useCallback(() => {
     activeAnimRef.current?.cancel();
     activeAnimRef.current = null;
+    if (safetyTimeoutRef.current) {
+      clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
     return () => {
       cancelAnim();
       const root = document.documentElement;
-      if (root.dataset.magicuiThemeVt !== "active") return;
       delete root.dataset.magicuiThemeVt;
       root.style.removeProperty("--magicui-theme-toggle-vt-duration");
       root.style.removeProperty("--magicui-theme-vt-clip-from");
@@ -141,141 +115,136 @@ export function AnimatedThemeToggler({
 
   const toggleTheme = useCallback(() => {
     const button = buttonRef.current;
-    if (
-      !button ||
-      isTransitioningRef.current ||
-      document.documentElement.dataset.magicuiThemeVt === "active"
-    )
-      return;
+    if (!button || isTransitioningRef.current) return;
 
     const newTheme = !isDark;
 
-    // Core theme mutation — called once by whichever path runs
+    // Apply theme synchronously to DOM, localStorage, and state
     const applyTheme = () => {
+      const root = document.documentElement;
+      if (newTheme) {
+        root.classList.add("dark");
+        root.classList.remove("light");
+      } else {
+        root.classList.remove("dark");
+        root.classList.add("light");
+      }
+
+      const meta = document.getElementById("theme-color-meta");
+      if (meta) {
+        meta.setAttribute("content", newTheme ? "#050505" : "#f8fafc");
+      }
+
+      try {
+        localStorage.setItem("theme", newTheme ? "dark" : "light");
+      } catch (_) {}
+
       if (isControlled) {
         onThemeChange?.(newTheme ? "dark" : "light");
       } else {
-        if (newTheme) {
-          document.documentElement.classList.add("dark");
-          document.documentElement.classList.remove("light");
-        } else {
-          document.documentElement.classList.remove("dark");
-          document.documentElement.classList.add("light");
-        }
         setInternalIsDark(newTheme);
-        const meta = document.getElementById("theme-color-meta");
-        if (meta) {
-          meta.setAttribute("content", newTheme ? "#050505" : "#f8fafc");
-        }
-        try {
-          localStorage.setItem("theme", newTheme ? "dark" : "light");
-        } catch (_) {}
       }
     };
 
-    // ─── PATH 1: Desktop with good GPU → full clip-path circle reveal ───
-    if (canHandleClipPathTransition()) {
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      let x, y;
-      if (fromCenter) {
-        x = viewportWidth / 2;
-        y = viewportHeight / 2;
-      } else {
-        const rect = button.getBoundingClientRect();
-        x = rect.left + rect.width / 2;
-        y = rect.top + rect.height / 2;
-      }
-
-      const maxRadius = Math.hypot(
-        Math.max(x, viewportWidth - x),
-        Math.max(y, viewportHeight - y)
-      );
-
-      const clipPath = getThemeTransitionClipPaths(
-        shape,
-        x,
-        y,
-        maxRadius,
-        viewportWidth,
-        viewportHeight
-      );
-
-      const root = document.documentElement;
-      root.dataset.magicuiThemeVt = "active";
-      root.style.setProperty(
-        "--magicui-theme-toggle-vt-duration",
-        `${duration}ms`
-      );
-      root.style.setProperty("--magicui-theme-vt-clip-from", clipPath[0]);
-
-      const cleanup = () => {
-        isTransitioningRef.current = false;
-        delete root.dataset.magicuiThemeVt;
-        root.style.removeProperty("--magicui-theme-toggle-vt-duration");
-        root.style.removeProperty("--magicui-theme-vt-clip-from");
-        cancelAnim();
-      };
-
-      isTransitioningRef.current = true;
-      const transition = document.startViewTransition(() => {
-        flushSync(applyTheme);
-      });
-
-      if (typeof transition?.finished?.finally === "function") {
-        transition.finished.finally(cleanup).catch(() => {});
-      } else {
-        cleanup();
-      }
-
-      const ready = transition?.ready;
-      if (ready && typeof ready.then === "function") {
-        ready
-          .then(() => {
-            const anim = document.documentElement.animate(
-              { clipPath },
-              {
-                duration,
-                easing: "ease-in-out",
-                fill: "forwards",
-                pseudoElement: "::view-transition-new(root)",
-              }
-            );
-            activeAnimRef.current = anim;
-          })
-          .catch(() => {});
-      }
+    // If browser doesn't support View Transitions or user prefers reduced motion
+    if (
+      typeof document.startViewTransition !== "function" ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      applyTheme();
       return;
     }
 
-    // ─── PATH 2: Mobile / touch / low-end → lightweight opacity crossfade ───
-    if (typeof document.startViewTransition === "function") {
-      const root = document.documentElement;
-      root.dataset.magicuiThemeVt = "mobile";
+    // Adaptive duration: 320ms on mobile touch screens for snappy, 60fps response
+    const isMobile =
+      window.matchMedia("(pointer: coarse)").matches ||
+      window.matchMedia("(hover: none)").matches ||
+      window.innerWidth < 640;
+    const animDuration = isMobile ? Math.min(duration, 320) : duration;
 
-      const cleanup = () => {
-        isTransitioningRef.current = false;
-        delete root.dataset.magicuiThemeVt;
-        cancelAnim();
-      };
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
 
-      isTransitioningRef.current = true;
-      const transition = document.startViewTransition(() => {
+    let x;
+    let y;
+    if (fromCenter) {
+      x = viewportWidth / 2;
+      y = viewportHeight / 2;
+    } else {
+      const rect = button.getBoundingClientRect();
+      x = rect.left + rect.width / 2;
+      y = rect.top + rect.height / 2;
+    }
+
+    const maxRadius = Math.hypot(
+      Math.max(x, viewportWidth - x),
+      Math.max(y, viewportHeight - y)
+    );
+
+    const clipPath = getThemeTransitionClipPaths(
+      shape,
+      x,
+      y,
+      maxRadius,
+      viewportWidth,
+      viewportHeight
+    );
+
+    const root = document.documentElement;
+    root.dataset.magicuiThemeVt = "active";
+    root.style.setProperty(
+      "--magicui-theme-toggle-vt-duration",
+      `${animDuration}ms`
+    );
+    root.style.setProperty("--magicui-theme-vt-clip-from", clipPath[0]);
+
+    const cleanup = () => {
+      isTransitioningRef.current = false;
+      delete root.dataset.magicuiThemeVt;
+      root.style.removeProperty("--magicui-theme-toggle-vt-duration");
+      root.style.removeProperty("--magicui-theme-vt-clip-from");
+      cancelAnim();
+    };
+
+    isTransitioningRef.current = true;
+
+    // Fail-safe timeout so button NEVER stays stuck if transition is interrupted
+    safetyTimeoutRef.current = setTimeout(cleanup, animDuration + 200);
+
+    let transition;
+    try {
+      transition = document.startViewTransition(() => {
         flushSync(applyTheme);
       });
-
-      if (typeof transition?.finished?.finally === "function") {
-        transition.finished.finally(cleanup).catch(() => {});
-      } else {
-        cleanup();
-      }
-
-      // Let the CSS @keyframes handle a fast opacity crossfade (no JS .animate)
+    } catch (_err) {
+      applyTheme();
+      cleanup();
       return;
     }
 
-    // ─── PATH 3: No View Transitions API → instant swap ───
-    applyTheme();
+    if (typeof transition?.finished?.finally === "function") {
+      transition.finished.finally(cleanup).catch(() => {});
+    } else {
+      cleanup();
+    }
+
+    const ready = transition?.ready;
+    if (ready && typeof ready.then === "function") {
+      ready
+        .then(() => {
+          const anim = document.documentElement.animate(
+            { clipPath },
+            {
+              duration: animDuration,
+              easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+              fill: "forwards",
+              pseudoElement: "::view-transition-new(root)",
+            }
+          );
+          activeAnimRef.current = anim;
+        })
+        .catch(() => {});
+    }
   }, [
     shape,
     fromCenter,
@@ -291,8 +260,10 @@ export function AnimatedThemeToggler({
       type="button"
       ref={buttonRef}
       onClick={toggleTheme}
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ WebkitTapHighlightColor: "transparent" }}
       className={cn(
-        "relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/90 dark:border-white/[0.1] bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-neutral-300 shadow-xs dark:shadow-sm transition-all duration-200 active:scale-90 cursor-pointer touch-manipulation",
+        "relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/90 dark:border-white/[0.1] bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-neutral-300 shadow-xs dark:shadow-sm transition-all duration-200 active:scale-90 cursor-pointer touch-manipulation select-none",
         className
       )}
       title={isDark ? "Switch to Light Theme" : "Switch to Dark Theme"}
@@ -300,9 +271,9 @@ export function AnimatedThemeToggler({
       {...props}
     >
       {isDark ? (
-        <Sun className="h-4 w-4 text-amber-500 transition-transform duration-300 rotate-0 scale-100" />
+        <Sun className="h-4 w-4 text-amber-500 transition-transform duration-300 rotate-0 scale-100 pointer-events-none" />
       ) : (
-        <Moon className="h-4 w-4 text-violet-400 transition-transform duration-300 rotate-0 scale-100" />
+        <Moon className="h-4 w-4 text-violet-400 transition-transform duration-300 rotate-0 scale-100 pointer-events-none" />
       )}
       <span className="sr-only">Toggle theme</span>
     </button>

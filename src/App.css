@@ -60,7 +60,7 @@
 }
 
 /* ==========================================================
-   Magic UI Theme Toggler — Desktop: Clip-Path Circle Reveal
+   Magic UI Animated Theme Toggler — Expanding Wave Reveal
    ========================================================== */
 html[data-magicui-theme-vt="active"]::view-transition-old(root),
 html[data-magicui-theme-vt="active"]::view-transition-new(root) {
@@ -77,26 +77,21 @@ html[data-magicui-theme-vt="active"] {
 }
 
 /* ==========================================================
-   Mobile / Touch: Fast GPU-Composited Opacity Crossfade
-   No clip-path, no CPU rasterization — pure compositor opacity.
+   Header Isolation — Keeps Navbar 100% Stable During Transitions
    ========================================================== */
-html[data-magicui-theme-vt="mobile"]::view-transition-old(root) {
-  z-index: 1;
-  animation: none;
+.app-header {
+  view-transition-name: app-header;
 }
 
-html[data-magicui-theme-vt="mobile"]::view-transition-new(root) {
-  z-index: 2;
-  animation: theme-mobile-fade 220ms ease-out both;
+::view-transition-group(app-header) {
+  animation: none !important;
+  z-index: 1000;
 }
 
-@keyframes theme-mobile-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-html[data-magicui-theme-vt="mobile"] {
-  pointer-events: none !important;
+::view-transition-old(app-header),
+::view-transition-new(app-header) {
+  animation: none !important;
+  mix-blend-mode: normal;
 }
 
 /* ==========================================================

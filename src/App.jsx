@@ -85,15 +85,11 @@ export default function App() {
     return 'dark';
   });
 
-  // Sync theme to DOM on initial mount and when theme changes.
-  // During animated transitions the toggler already applies the class inside
-  // startViewTransition, so this effect only matters for the first render
-  // and for non-toggler theme changes (e.g. URL param, system preference).
+  // Sync theme to DOM on every theme state change.
+  // The view transition callback uses flushSync so this effect fires
+  // inside the transition's DOM-update phase — which is exactly right.
   useEffect(() => {
     const root = document.documentElement;
-    // Skip if a view transition is actively animating — it already applied
-    if (root.dataset.magicuiThemeVt) return;
-
     const metaThemeColor = document.getElementById('theme-color-meta');
     if (theme === 'dark') {
       root.classList.add('dark');
@@ -154,7 +150,7 @@ export default function App() {
       </div>
 
       {/* Top Floating 3D Glassy Navbar: Fully rounded, compact, floating with smooth depth */}
-      <header className="sticky top-3 sm:top-5 z-40 w-full px-3 sm:px-6 flex justify-center pointer-events-none">
+      <header className="sticky top-3 sm:top-5 z-40 w-full px-3 sm:px-6 flex justify-center pointer-events-none app-header">
         <div className="pointer-events-auto floating-glass-navbar w-full max-w-4xl px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full flex items-center justify-between
           bg-white/75 dark:bg-[#0c0c12]/80
           border border-white/60 dark:border-white/[0.12]
