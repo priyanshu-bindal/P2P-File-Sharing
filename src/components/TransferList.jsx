@@ -6,7 +6,6 @@ import {
   XCircle, 
   AlertOctagon, 
   Clock, 
-  FileText, 
   X, 
   Gauge, 
   Trash2 
@@ -207,15 +206,7 @@ export function TransferList({
   onRemoveTransfer 
 }) {
   if (!transfers || transfers.length === 0) {
-    return (
-      <div className="w-full bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-neutral-800/80 rounded-2xl p-6 sm:p-8 text-center text-slate-400 dark:text-neutral-500 shadow-sm transition-all duration-300">
-        <FileText className="w-7 h-7 mx-auto mb-2 opacity-30 text-slate-400 dark:text-neutral-400" />
-        <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-neutral-400">No file transfers yet</p>
-        <p className="text-[11px] text-slate-400 dark:text-neutral-600 mt-0.5">
-          Files you send or receive will appear here with live progress
-        </p>
-      </div>
-    );
+    return null;
   }
 
   const activeCount = transfers.filter((t) => t.status === 'sending' || t.status === 'receiving').length;

@@ -4,13 +4,12 @@ import { ConnectCard } from './components/ConnectCard';
 import { DropZone } from './components/DropZone';
 import { TransferList } from './components/TransferList';
 import { TextShare } from './components/TextShare';
+import { AnimatedThemeToggler } from './components/AnimatedThemeToggler';
 import { 
   AlertTriangle, 
   X, 
   Share2, 
   Check, 
-  Sun, 
-  Moon, 
   Files, 
   ClipboardType
 } from 'lucide-react';
@@ -105,26 +104,6 @@ export default function App() {
     }
   }, [theme]);
 
-  const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
-
-    // 1. If native hardware-accelerated View Transitions are supported (iOS Safari 18+, Chrome on Android)
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-      document.startViewTransition(() => {
-        setTheme(nextTheme);
-      });
-      return;
-    }
-
-    // 2. Mobile fallback: Synchronize all DOM layer styles in lockstep without layout thrashing
-    const root = document.documentElement;
-    root.classList.add('theme-transitioning');
-    setTheme(nextTheme);
-    setTimeout(() => {
-      root.classList.remove('theme-transitioning');
-    }, 320);
-  };
-
   const handleCopyInvite = async () => {
     try {
       await navigator.clipboard.writeText(shareableUrl);
@@ -148,15 +127,28 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#050505] text-slate-900 dark:text-white flex flex-col transition-colors duration-300">
-      {/* Subtle ambient lighting with breathing pulse */}
+      {/* Subtle ambient lighting with GPU-accelerated radial gradients (silky smooth on low-end devices) */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute top-[-20%] left-[20%] w-[600px] h-[600px] bg-violet-600/[0.04] dark:bg-violet-600/[0.04] rounded-full blur-[150px] animate-glow-breathe" />
-        <div className="absolute bottom-[-15%] right-[20%] w-[500px] h-[500px] bg-cyan-600/[0.03] dark:bg-cyan-600/[0.03] rounded-full blur-[150px] animate-glow-breathe" style={{ animationDelay: '4s' }} />
+        <div 
+          className="absolute top-[-10%] left-[15%] w-[550px] h-[550px] rounded-full animate-glow-breathe"
+          style={{
+            background: 'radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, rgba(139, 92, 246, 0.02) 40%, transparent 70%)',
+            transform: 'translate3d(0, 0, 0)',
+          }}
+        />
+        <div 
+          className="absolute bottom-[-10%] right-[15%] w-[500px] h-[500px] rounded-full animate-glow-breathe"
+          style={{
+            background: 'radial-gradient(circle, rgba(6, 182, 212, 0.06) 0%, rgba(6, 182, 212, 0.015) 40%, transparent 70%)',
+            animationDelay: '4s',
+            transform: 'translate3d(0, 0, 0)',
+          }}
+        />
       </div>
 
       {/* Top Floating 3D Glassy Navbar: Fully rounded, compact, floating with smooth depth */}
       <header className="sticky top-3 sm:top-5 z-40 w-full px-3 sm:px-6 flex justify-center pointer-events-none">
-        <div className="pointer-events-auto floating-glass-navbar animate-navbar-float w-full max-w-4xl px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full flex items-center justify-between
+        <div className="pointer-events-auto floating-glass-navbar w-full max-w-4xl px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full flex items-center justify-between
           bg-white/75 dark:bg-[#0c0c12]/80
           border border-white/60 dark:border-white/[0.12]
           shadow-[0_12px_32px_-6px_rgba(0,0,0,0.08),0_4px_12px_-2px_rgba(0,0,0,0.04),inset_0_1px_1px_0_rgba(255,255,255,0.9),inset_0_-1px_1px_0_rgba(0,0,0,0.04)]
@@ -233,17 +225,13 @@ export default function App() {
               )}
             </button>
 
-            {/* Smooth Animated Theme Toggle Switcher */}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-neutral-300 border border-slate-200/90 dark:border-white/[0.1] shadow-xs dark:shadow-sm transition-all duration-300 active:scale-90 cursor-pointer relative overflow-hidden touch-manipulation"
-              title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-              aria-label="Toggle theme"
-            >
-              <Sun className="w-4 h-4 text-amber-500 rotate-0 scale-100 transition-all duration-300 ease-out dark:-rotate-90 dark:scale-0 absolute pointer-events-none" />
-              <Moon className="w-4 h-4 text-violet-400 rotate-90 scale-0 transition-all duration-300 ease-out dark:rotate-0 dark:scale-100 absolute pointer-events-none" />
-            </button>
+            {/* Magic UI Animated Theme Toggler */}
+            <AnimatedThemeToggler
+              theme={theme}
+              onThemeChange={setTheme}
+              variant="circle"
+              duration={450}
+            />
           </div>
         </div>
       </header>
@@ -280,11 +268,12 @@ export default function App() {
         {/* 2. Mode Selector: Files vs Text & Clipboard (Compact 3D Glassy Segmented Capsule) */}
         <div className="flex justify-center -my-0.5">
           <div className="relative inline-grid grid-cols-2 p-1 rounded-full bg-slate-200/80 dark:bg-[#0a0a10] border border-slate-300/70 dark:border-white/[0.08] shadow-inner backdrop-blur-md max-w-md w-full sm:w-auto">
-            {/* Smooth Animated Sliding Indicator Capsule */}
+            {/* Smooth Animated Sliding Indicator Capsule (GPU Composited) */}
             <span
-              className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-white dark:bg-[#1c1c28] border border-slate-200/90 dark:border-white/[0.16] shadow-sm dark:shadow-[0_2px_10px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.18)] transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] pointer-events-none"
+              className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-white dark:bg-[#1c1c28] border border-slate-200/90 dark:border-white/[0.16] shadow-sm dark:shadow-[0_2px_10px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.18)] transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] pointer-events-none will-change-transform"
               style={{
-                transform: activeTab === 'files' ? 'translateX(0)' : 'translateX(100%)',
+                transform: activeTab === 'files' ? 'translate3d(0, 0, 0)' : 'translate3d(100%, 0, 0)',
+                backfaceVisibility: 'hidden',
               }}
             />
 
