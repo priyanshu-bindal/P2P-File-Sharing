@@ -85,8 +85,15 @@ export default function App() {
     return 'dark';
   });
 
+  // Sync theme to DOM on initial mount and when theme changes.
+  // During animated transitions the toggler already applies the class inside
+  // startViewTransition, so this effect only matters for the first render
+  // and for non-toggler theme changes (e.g. URL param, system preference).
   useEffect(() => {
     const root = document.documentElement;
+    // Skip if a view transition is actively animating — it already applied
+    if (root.dataset.magicuiThemeVt) return;
+
     const metaThemeColor = document.getElementById('theme-color-meta');
     if (theme === 'dark') {
       root.classList.add('dark');

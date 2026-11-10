@@ -3,43 +3,45 @@ import { Moon, Sun } from "lucide-react";
 import { flushSync } from "react-dom";
 import { cn } from "@/lib/utils";
 
+/**
+ * Detect if the device is a touch-primary mobile device.
+ * We use this to choose a lighter animation path that won't lag.
+ */
+function isTouchDevice() {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(hover: none)").matches ||
+    "ontouchstart" in window
+  );
+}
+
+/**
+ * Check if the device/browser can handle the heavy clip-path view transition
+ * without dropping frames. Returns false on mobile or low-end hardware.
+ */
+function canHandleClipPathTransition() {
+  if (typeof window === "undefined") return false;
+  if (typeof document.startViewTransition !== "function") return false;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+    return false;
+
+  // Touch-primary devices (phones, tablets) → skip clip-path, use fast crossfade
+  if (isTouchDevice()) return false;
+
+  // Low-end desktop devices
+  const cores = navigator.hardwareConcurrency;
+  const mem = navigator.deviceMemory;
+  if ((cores && cores <= 2) || (mem && mem < 2)) return false;
+
+  return true;
+}
+
 function polygonCollapsed(point, vertexCount) {
   const pairs = Array.from({ length: vertexCount }, () => point).join(", ");
   return `polygon(${pairs})`;
 }
 
-/**
- * Calculates adaptive duration:
- * - On low-spec devices (<=4 cores / <4GB RAM), sets duration to a crisp 340ms
- *   to preserve 60fps without dropping a single frame of the expanding wave.
- * - Respects prefers-reduced-motion.
- */
-function getOptimalDuration(baseDuration) {
-  if (typeof window === "undefined") return baseDuration;
-
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    return 180;
-  }
-
-  const isLowEnd =
-    (typeof navigator !== "undefined" &&
-      navigator.hardwareConcurrency &&
-      navigator.hardwareConcurrency <= 4) ||
-    (typeof navigator !== "undefined" &&
-      navigator.deviceMemory &&
-      navigator.deviceMemory < 4);
-
-  if (isLowEnd) {
-    return Math.min(baseDuration, 340);
-  }
-
-  return baseDuration;
-}
-
-// All coordinates are percentages of the snapshot reference box: Chrome 150
-// renders absolute px clip-path coordinates on ::view-transition-new(root)
-// unscaled on fractional display scales (e.g. Windows 150%) for the first
-// transition after load, so px values land at the wrong position (#989).
 function getThemeTransitionClipPaths(
   variant = "circle",
   cx,
@@ -51,7 +53,6 @@ function getThemeTransitionClipPaths(
   const toX = (x) => `${(x / viewportWidth) * 100}%`;
   const toY = (y) => `${(y / viewportHeight) * 100}%`;
   const point = (x, y) => `${toX(x)} ${toY(y)}`;
-  // circle() percentage radii resolve against hypot(w, h) / sqrt(2) of the reference box.
   const toRadius = (r) =>
     `${(r / (Math.hypot(viewportWidth, viewportHeight) / Math.SQRT2)) * 100}%`;
 
@@ -73,18 +74,7 @@ function getThemeTransitionClipPaths(
       ].join(", ");
       return [polygonCollapsed(point(cx, cy), 4), `polygon(${end})`];
     }
-    case "triangle": {
-      const scale = maxRadius * 2.2;
-      const dx = (Math.sqrt(3) / 2) * scale;
-      const verts = [
-        point(cx, cy - scale),
-        point(cx + dx, cy + 0.5 * scale),
-        point(cx - dx, cy + 0.5 * scale),
-      ].join(", ");
-      return [polygonCollapsed(point(cx, cy), 3), `polygon(${verts})`];
-    }
     case "diamond": {
-      // Slightly larger than the view-transition circle radius so axis-aligned coverage matches the circle reveal.
       const R = maxRadius * Math.SQRT2;
       const end = [
         point(cx, cy - R),
@@ -93,55 +83,6 @@ function getThemeTransitionClipPaths(
         point(cx - R, cy),
       ].join(", ");
       return [polygonCollapsed(point(cx, cy), 4), `polygon(${end})`];
-    }
-    case "hexagon": {
-      const R = maxRadius * Math.SQRT2;
-      const verts = [];
-      for (let i = 0; i < 6; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / 3;
-        verts.push(point(cx + R * Math.cos(a), cy + R * Math.sin(a)));
-      }
-      return [
-        polygonCollapsed(point(cx, cy), 6),
-        `polygon(${verts.join(", ")})`,
-      ];
-    }
-    case "rectangle": {
-      const halfW = Math.max(cx, viewportWidth - cx);
-      const halfH = Math.max(cy, viewportHeight - cy);
-      const end = [
-        point(cx - halfW, cy - halfH),
-        point(cx + halfW, cy - halfH),
-        point(cx + halfW, cy + halfH),
-        point(cx - halfW, cy + halfH),
-      ].join(", ");
-      return [polygonCollapsed(point(cx, cy), 4), `polygon(${end})`];
-    }
-    case "star": {
-      // Small overscan so the last frames never leave a 1px seam before the transition group ends.
-      const R = maxRadius * Math.SQRT2 * 1.03;
-      const innerRatio = 0.42;
-      const starPolygon = (radius) => {
-        const verts = [];
-        for (let i = 0; i < 5; i++) {
-          const outerA = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
-          verts.push(
-            point(
-              cx + radius * Math.cos(outerA),
-              cy + radius * Math.sin(outerA)
-            )
-          );
-          const innerA = outerA + Math.PI / 5;
-          verts.push(
-            point(
-              cx + radius * innerRatio * Math.cos(innerA),
-              cy + radius * innerRatio * Math.sin(innerA)
-            )
-          );
-        }
-        return `polygon(${verts.join(", ")})`;
-      };
-      return [polygonCollapsed(point(cx, cy), 10), starPolygon(R)];
     }
     default:
       return [
@@ -186,19 +127,15 @@ export function AnimatedThemeToggler({
 
   useEffect(() => {
     if (isControlled) return;
-
     const updateTheme = () => {
       setInternalIsDark(document.documentElement.classList.contains("dark"));
     };
-
     updateTheme();
-
     const observer = new MutationObserver(updateTheme);
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class"],
     });
-
     return () => observer.disconnect();
   }, [isControlled]);
 
@@ -211,116 +148,134 @@ export function AnimatedThemeToggler({
     )
       return;
 
-    // innerWidth/innerHeight (not visualViewport): percentages must resolve
-    // against the snapshot reference box, which includes classic scrollbars.
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    const newTheme = !isDark;
 
-    let x;
-    let y;
-    if (fromCenter) {
-      x = viewportWidth / 2;
-      y = viewportHeight / 2;
-    } else {
-      const { top, left, width, height } = button.getBoundingClientRect();
-      x = left + width / 2;
-      y = top + height / 2;
-    }
-
-    const maxRadius = Math.hypot(
-      Math.max(x, viewportWidth - x),
-      Math.max(y, viewportHeight - y)
-    );
-
+    // Core theme mutation — called once by whichever path runs
     const applyTheme = () => {
-      const newTheme = !isDark;
-      if (newTheme) {
-        document.documentElement.classList.add("dark");
-        document.documentElement.classList.remove("light");
-      } else {
-        document.documentElement.classList.remove("dark");
-        document.documentElement.classList.add("light");
-      }
-
-      const meta = document.getElementById("theme-color-meta");
-      if (meta) {
-        meta.setAttribute("content", newTheme ? "#050505" : "#f8fafc");
-      }
-
       if (isControlled) {
         onThemeChange?.(newTheme ? "dark" : "light");
       } else {
+        if (newTheme) {
+          document.documentElement.classList.add("dark");
+          document.documentElement.classList.remove("light");
+        } else {
+          document.documentElement.classList.remove("dark");
+          document.documentElement.classList.add("light");
+        }
         setInternalIsDark(newTheme);
+        const meta = document.getElementById("theme-color-meta");
+        if (meta) {
+          meta.setAttribute("content", newTheme ? "#050505" : "#f8fafc");
+        }
         try {
           localStorage.setItem("theme", newTheme ? "dark" : "light");
         } catch (_) {}
       }
     };
 
-    if (typeof document.startViewTransition !== "function") {
-      applyTheme();
+    // ─── PATH 1: Desktop with good GPU → full clip-path circle reveal ───
+    if (canHandleClipPathTransition()) {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      let x, y;
+      if (fromCenter) {
+        x = viewportWidth / 2;
+        y = viewportHeight / 2;
+      } else {
+        const rect = button.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      }
+
+      const maxRadius = Math.hypot(
+        Math.max(x, viewportWidth - x),
+        Math.max(y, viewportHeight - y)
+      );
+
+      const clipPath = getThemeTransitionClipPaths(
+        shape,
+        x,
+        y,
+        maxRadius,
+        viewportWidth,
+        viewportHeight
+      );
+
+      const root = document.documentElement;
+      root.dataset.magicuiThemeVt = "active";
+      root.style.setProperty(
+        "--magicui-theme-toggle-vt-duration",
+        `${duration}ms`
+      );
+      root.style.setProperty("--magicui-theme-vt-clip-from", clipPath[0]);
+
+      const cleanup = () => {
+        isTransitioningRef.current = false;
+        delete root.dataset.magicuiThemeVt;
+        root.style.removeProperty("--magicui-theme-toggle-vt-duration");
+        root.style.removeProperty("--magicui-theme-vt-clip-from");
+        cancelAnim();
+      };
+
+      isTransitioningRef.current = true;
+      const transition = document.startViewTransition(() => {
+        flushSync(applyTheme);
+      });
+
+      if (typeof transition?.finished?.finally === "function") {
+        transition.finished.finally(cleanup).catch(() => {});
+      } else {
+        cleanup();
+      }
+
+      const ready = transition?.ready;
+      if (ready && typeof ready.then === "function") {
+        ready
+          .then(() => {
+            const anim = document.documentElement.animate(
+              { clipPath },
+              {
+                duration,
+                easing: "ease-in-out",
+                fill: "forwards",
+                pseudoElement: "::view-transition-new(root)",
+              }
+            );
+            activeAnimRef.current = anim;
+          })
+          .catch(() => {});
+      }
       return;
     }
 
-    const clipPath = getThemeTransitionClipPaths(
-      shape,
-      x,
-      y,
-      maxRadius,
-      viewportWidth,
-      viewportHeight
-    );
+    // ─── PATH 2: Mobile / touch / low-end → lightweight opacity crossfade ───
+    if (typeof document.startViewTransition === "function") {
+      const root = document.documentElement;
+      root.dataset.magicuiThemeVt = "mobile";
 
-    const effectiveDuration = getOptimalDuration(duration);
-    const root = document.documentElement;
-    root.dataset.magicuiThemeVt = "active";
-    root.style.setProperty(
-      "--magicui-theme-toggle-vt-duration",
-      `${effectiveDuration}ms`
-    );
-    // Pin the collapsed clip-path via CSS so Firefox does not paint the new
-    // theme unclipped between snapshot and the ready.then() JS animation.
-    root.style.setProperty("--magicui-theme-vt-clip-from", clipPath[0]);
+      const cleanup = () => {
+        isTransitioningRef.current = false;
+        delete root.dataset.magicuiThemeVt;
+        cancelAnim();
+      };
 
-    const cleanup = () => {
-      isTransitioningRef.current = false;
-      delete root.dataset.magicuiThemeVt;
-      root.style.removeProperty("--magicui-theme-toggle-vt-duration");
-      root.style.removeProperty("--magicui-theme-vt-clip-from");
-      cancelAnim();
-    };
+      isTransitioningRef.current = true;
+      const transition = document.startViewTransition(() => {
+        flushSync(applyTheme);
+      });
 
-    isTransitioningRef.current = true;
-    const transition = document.startViewTransition(() => {
-      flushSync(applyTheme);
-    });
+      if (typeof transition?.finished?.finally === "function") {
+        transition.finished.finally(cleanup).catch(() => {});
+      } else {
+        cleanup();
+      }
 
-    if (typeof transition?.finished?.finally === "function") {
-      transition.finished.finally(cleanup).catch(() => {});
-    } else {
-      cleanup();
+      // Let the CSS @keyframes handle a fast opacity crossfade (no JS .animate)
+      return;
     }
 
-    const ready = transition?.ready;
-    if (ready && typeof ready.then === "function") {
-      ready
-        .then(() => {
-          const anim = document.documentElement.animate(
-            {
-              clipPath,
-            },
-            {
-              duration: effectiveDuration,
-              // Star: linear avoids easing overshoot that fights polygon interpolation at t→1; VT group duration is synced above.
-              easing: shape === "star" ? "linear" : "ease-in-out",
-              fill: "forwards",
-              pseudoElement: "::view-transition-new(root)",
-            }
-          );
-          activeAnimRef.current = anim;
-        })
-        .catch(() => {});
-    }
+    // ─── PATH 3: No View Transitions API → instant swap ───
+    applyTheme();
   }, [
     shape,
     fromCenter,

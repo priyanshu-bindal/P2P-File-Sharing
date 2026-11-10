@@ -60,39 +60,43 @@
 }
 
 /* ==========================================================
-   Magic UI Animated Theme Toggler View Transitions
-   Hardware Accelerated for 60fps on Mobile & Low-End GPUs
+   Magic UI Theme Toggler — Desktop: Clip-Path Circle Reveal
    ========================================================== */
 html[data-magicui-theme-vt="active"]::view-transition-old(root),
 html[data-magicui-theme-vt="active"]::view-transition-new(root) {
   animation: none;
   mix-blend-mode: normal;
-  /* Promote transition snapshot directly to dedicated GPU compositor layer */
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  will-change: clip-path;
 }
 
 html[data-magicui-theme-vt="active"]::view-transition-new(root) {
   clip-path: var(--magicui-theme-vt-clip-from, none);
 }
 
-/* Prevent pointer events & layout recalculation storms during active transition */
 html[data-magicui-theme-vt="active"] {
   pointer-events: none !important;
-  user-select: none !important;
 }
 
-/* Optimized fallback transition for legacy browsers (avoids universal * selector layout storm) */
-html.theme-transitioning,
-html.theme-transitioning body,
-html.theme-transitioning header,
-html.theme-transitioning .aesthetic-card,
-html.theme-transitioning footer {
-  transition: background-color 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-              color 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+/* ==========================================================
+   Mobile / Touch: Fast GPU-Composited Opacity Crossfade
+   No clip-path, no CPU rasterization — pure compositor opacity.
+   ========================================================== */
+html[data-magicui-theme-vt="mobile"]::view-transition-old(root) {
+  z-index: 1;
+  animation: none;
+}
+
+html[data-magicui-theme-vt="mobile"]::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-mobile-fade 220ms ease-out both;
+}
+
+@keyframes theme-mobile-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+html[data-magicui-theme-vt="mobile"] {
+  pointer-events: none !important;
 }
 
 /* ==========================================================
