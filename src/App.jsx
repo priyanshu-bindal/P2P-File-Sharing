@@ -129,7 +129,7 @@ export default function App() {
   const activeTransfersCount = transfers.filter((t) => t.status === 'sending' || t.status === 'receiving').length;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#050505] text-slate-900 dark:text-white flex flex-col transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#050505] text-slate-900 dark:text-white flex flex-col">
       {/* Subtle ambient lighting with GPU-accelerated radial gradients (silky smooth on low-end devices) */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div 
@@ -150,7 +150,7 @@ export default function App() {
       </div>
 
       {/* Top Floating 3D Glassy Navbar: Fully rounded, compact, floating with smooth depth */}
-      <header className="sticky top-3 sm:top-5 z-40 w-full px-3 sm:px-6 flex justify-center pointer-events-none app-header">
+      <header className="sticky top-3 sm:top-5 z-40 w-full px-3 sm:px-6 flex justify-center pointer-events-none">
         <div className="pointer-events-auto floating-glass-navbar w-full max-w-4xl px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full flex items-center justify-between
           bg-white/75 dark:bg-[#0c0c12]/80
           border border-white/60 dark:border-white/[0.12]
@@ -228,12 +228,10 @@ export default function App() {
               )}
             </button>
 
-            {/* Magic UI Animated Theme Toggler */}
+            {/* Theme Toggler */}
             <AnimatedThemeToggler
               theme={theme}
               onThemeChange={setTheme}
-              variant="circle"
-              duration={450}
             />
           </div>
         </div>
@@ -352,7 +350,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-[11px] text-slate-500 dark:text-neutral-600 border-t border-slate-200/80 dark:border-white/[0.04] transition-colors duration-300">
+      <footer className="relative z-10 py-4 text-center text-[11px] text-slate-500 dark:text-neutral-600 border-t border-slate-200/80 dark:border-white/[0.04]">
         Files & text never touch a server • Direct Peer-to-Peer Transfer
       </footer>
     </div>

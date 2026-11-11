@@ -60,41 +60,6 @@
 }
 
 /* ==========================================================
-   Magic UI Animated Theme Toggler — Expanding Wave Reveal
-   ========================================================== */
-html[data-magicui-theme-vt="active"]::view-transition-old(root),
-html[data-magicui-theme-vt="active"]::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-
-html[data-magicui-theme-vt="active"]::view-transition-new(root) {
-  clip-path: var(--magicui-theme-vt-clip-from, none);
-}
-
-html[data-magicui-theme-vt="active"] {
-  pointer-events: none !important;
-}
-
-/* ==========================================================
-   Header Isolation — Keeps Navbar 100% Stable During Transitions
-   ========================================================== */
-.app-header {
-  view-transition-name: app-header;
-}
-
-::view-transition-group(app-header) {
-  animation: none !important;
-  z-index: 1000;
-}
-
-::view-transition-old(app-header),
-::view-transition-new(app-header) {
-  animation: none !important;
-  mix-blend-mode: normal;
-}
-
-/* ==========================================================
    3D Glassy Floating Navbar (Stable Compositing Layer)
    ========================================================== */
 .floating-glass-navbar {
